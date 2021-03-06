@@ -77,7 +77,7 @@ class FiltersChangeResidualBlock(Layer):
 
 class NNCFModel(Model):
     def train_step(self, data):
-        if len(data) == 3:
+        if np.shape(data)[0] == 3:
             ground_truth, weights, sample_weight = data
         else:
             sample_weight = None
