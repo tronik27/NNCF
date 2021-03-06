@@ -155,27 +155,3 @@ nncf.compile(optimizer=tf.keras.optimizers.Adam(0.002),
 
 print(nncf.summary())
 history = nncf.fit(train_data, validation_data=validation_data, epochs=epochs)
-
-# train_loss_results, train_accuracy_results, batch_loss_results, cf = fit(model=nncf,
-#                                                                          num_epochs=epochs,
-#                                                                          train_dataset=train_data,
-#                                                                          validation_dataset=validation_data,
-#                                                                          optimizer=optimizer,
-#                                                                          start_matrix=x,
-#                                                                          loss=mse_loss,
-#                                                                          average_loss=mean_loss,
-#                                                                          grad_fn=grad)
-#
-#
-# model_output = nncf(x)
-# print(model_output[0].shape)
-# x = model_output[1]
-# c = model_output[0]
-# print(np.where(model_output[0] > 0))
-# plt.imshow(x[0, :, :, 0], cmap='gray')
-# plt.show()
-#
-# Plot3D(c[0, :, :, 0])
-#learning_curves_plot(train_loss_results, train_accuracy_results)
-
-# PrepareSVHS()
