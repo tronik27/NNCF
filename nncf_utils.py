@@ -10,7 +10,7 @@ from Correlation_utils import Plot3D
 
 
 def make_gt_correlation(shape, num_corrs, labels, gt_lable):
-    gt = np.zeros((len(labels), shape, shape, num_corrs), dtype='float32')
+    gt = np.zeros((labels.shape[0], shape, shape, num_corrs), dtype='float32')
     if shape % 2:
         gt[np.where(labels == gt_lable), shape // 2 - 1:shape // 2 + 2, shape // 2 - 1:shape // 2 + 2, :] = 1
     else:
@@ -20,7 +20,7 @@ def make_gt_correlation(shape, num_corrs, labels, gt_lable):
 
 def make_dataset(images, labels, batch_size, augmentation=False):
     data = tf.data.Dataset.from_tensor_slices((images, labels))
-    data = data.shuffle(len(images), reshuffle_each_iteration=True)
+    data = data.shuffle(images.shape[0], reshuffle_each_iteration=True)
     data = data.batch(batch_size, drop_remainder=True)
     if augmentation:
         AUTOTUNE = tf.data.experimental.AUTOTUNE
