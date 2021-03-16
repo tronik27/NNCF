@@ -7,34 +7,62 @@ import matplotlib.pyplot as plt
 from scipy.io import loadmat
 from sklearn.model_selection import train_test_split
 from Correlation_utils import Plot3D
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 
-def make_gt_correlation(shape, num_corrs, labels, gt_lable):
-    gt = np.zeros((labels.shape[0], shape, shape, num_corrs), dtype='float32')
-    if shape % 2:
-        gt[np.where(labels == gt_lable), shape // 2 - 1:shape // 2 + 2, shape // 2 - 1:shape // 2 + 2, :] = 1
+def balance_class(images, lables, lable, num_of_images):
+    positive_images = images[lables == lable]
+    positive_lables = lables[lables == lable]
+    negative_images = images[lables != lable]
+    negative_lables = lables[lables != lable]
+    if num_of_images//2 < positive_images.shape[0]:
+        positive_images = positive_images[:num_of_images//2, :, :]
+        negative_images = negative_images[:num_of_images//2, :, :]
+        positive_lables = positive_lables[:num_of_images // 2]
+        negative_lables = negative_lables[:num_of_images // 2]
     else:
-        gt[np.where(labels == gt_lable), shape//2-1:shape//2+1, shape//2-1:shape//2+1, :] = 1
-    return gt
+        negative_images = negative_images[:num_of_images - positive_images.shape[0], :, :]
+        negative_lables = negative_lables[:num_of_images - positive_images.shape[0]]
+    images = np.vstack((positive_images, negative_images))
+    lables = np.hstack((positive_lables, negative_lables))
+    return images, lables
 
 
-def make_dataset(images, labels, batch_size, augmentation=False):
-    data = tf.data.Dataset.from_tensor_slices((images, labels))
-    data = data.shuffle(images.shape[0], reshuffle_each_iteration=True)
-    data = data.batch(batch_size, drop_remainder=True)
+def make_gt_correlation(shape, labels, gt_lable=0, sample_weight=(1, 100)):
+    gt = np.zeros(shape, dtype='float32')
+    class_weights = np.ones(shape, dtype='float32')*sample_weight[0]
+
+    if shape[1] % 2:
+        x1, x2 = shape[1] // 2 - 1, shape[1] // 2 + 2
+        gt[np.where(labels == gt_lable), x1:x2, x1:x2, :] = 1
+        class_weights[np.where(labels == gt_lable), x1:x2, x1:x2, :] = 1*sample_weight[1]
+    else:
+        x1, x2 = shape[1]//2-1, shape[1]//2+1
+        gt[np.where(labels == gt_lable), x1:x2, x1:x2, :] = 1
+        class_weights[np.where(labels == gt_lable), x1:x2, x1:x2, :] = 1*sample_weight[1]
+    return gt, class_weights
+
+
+def make_data_generator(images, batch_size, augmentation, labels, target_size=None):
+    # if not target_size:
+    #     target_size = images.shape[1:]
+    images = np.expand_dims(images, 3).astype(np.float32)
+    gt, sample_weights = make_gt_correlation(shape=images.shape, labels=labels)
     if augmentation:
-        AUTOTUNE = tf.data.experimental.AUTOTUNE
-        data_augmentation = tf.keras.Sequential([experimental.preprocessing.RandomFlip("horizontal_and_vertical"),
-                                                 experimental.preprocessing.RandomRotation(0.2)])
-        data = data.map(lambda x, y: (x, data_augmentation(y, training=True)), num_parallel_calls=AUTOTUNE)
+        rotation_range, horizontal_flip, vertical_flip = augmentation
+        datagen = ImageDataGenerator(rescale=1/255.,
+                                     rotation_range=rotation_range,
+                                     horizontal_flip=horizontal_flip,
+                                     vertical_flip=vertical_flip)
+    else:
+        datagen = ImageDataGenerator(rescale=1 / 255.)
 
-    data = data.map(lambda x, y: (x, y[..., np.newaxis]))
-    data = data.map(lambda x, y: (x, tf.transpose(y, perm=(0, 4, 1, 2, 3))))
-
+    data = datagen.flow(images, gt, sample_weight=sample_weights, seed=42, batch_size=batch_size, shuffle=True)
     return data
 
 
-def data_prepare(train_images, train_labels, validation_images=None, validation_labels=None, label=0, num_of_corr=32):
+def data_prepare(train_images, train_labels, validation_images=None, validation_labels=None, label=0, num_of_corr=32,
+                 num_of_images=None, augmentation=None, target_size=None):
 
     if not validation_images.any():
         train_images, train_labels, validation_images, validation_labels = train_test_split(train_images,
@@ -42,23 +70,25 @@ def data_prepare(train_images, train_labels, validation_images=None, validation_
                                                                                             shuffle=True,
                                                                                             test_size=0.33,
                                                                                             random_state=42)
+    if not num_of_images or num_of_images > train_images.shape[0]:
+        num_of_images = train_images.shape[0]
+        print('num_of_images set to {}!'.format(train_images.shape[0]))
 
-    train_images = train_images[..., np.newaxis].astype(np.float32) / 255.
-    train_images = train_images[train_labels == label]
-    train_corr = make_gt_correlation(train_images.shape[1], num_of_corr, train_labels[train_labels == label], label)
-    print(np.where(train_corr > 0))
-    train_data = make_dataset(train_corr, train_images, num_of_corr, augmentation=False)
+    train_images, train_labels = balance_class(train_images, train_labels, label, num_of_images)
+    train_weights = make_data_generator(images=train_images,
+                                        batch_size=num_of_corr,
+                                        augmentation=augmentation,
+                                        labels=train_labels,
+                                        target_size=target_size)
 
-    validation_images = validation_images[..., np.newaxis].astype(np.float32) / 255.
-    validation_images = validation_images[:2000, :, :, :]
-    validation_num_of_corr = num_of_corr
-    validation_corr = make_gt_correlation(validation_images.shape[1],
-                                          validation_num_of_corr,
-                                          validation_labels[:2000],
-                                          label)
-    validation_data = make_dataset(validation_corr, validation_images, num_of_corr, augmentation=True)
+    validation_images, validation_labels = balance_class(validation_images, validation_labels, label, num_of_images)
+    validation_weights = make_data_generator(images=validation_images,
+                                             batch_size=num_of_corr,
+                                             augmentation=augmentation,
+                                             labels=validation_labels,
+                                             target_size=target_size)
 
-    return train_data, validation_data, train_images.shape
+    return train_weights, validation_weights, train_images.shape
 
 
 def PrepareSVHS():
