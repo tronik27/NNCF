@@ -75,53 +75,7 @@ class FiltersChangeResidualBlock(Layer):
         return Add()([x, x1])
 
 
-class NNCFModel(Model):
-    def train_step(self, data):
-        if np.shape(data)[0] == 3:
-            ground_truth, weights, sample_weight = data
-        else:
-            sample_weight = None
-            ground_truth, weights = data
-
-        x = tf.zeros((1, 28, 28, 1))
-        print('wsh1:', weights.shape)
-        weights = tf.transpose(weights)
-        print('wsh2:', weights.shape)
-        ground_truth = tf.transpose(ground_truth)[:1, :, :, :]
-        print('rwsh:', np.shape(self.get_layer('correlation').weights))
-        self.get_layer('correlation').set_weights(weights)
-
-        with tf.GradientTape() as tape:
-            y_pred = self(x, training=True)[0]
-            loss = self.compiled_loss(ground_truth, y_pred, sample_weight=sample_weight,
-                                      regularization_losses=self.losses)
-
-        gradients = tape.gradient(loss, self.trainable_variables)
-        self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
-        self.compiled_metrics.update_state(ground_truth, y_pred, sample_weight=sample_weight)
-
-        return {m.name: m.result() for m in self.metrics}
-
-    def test_step(self, data):
-        ground_truth, weights = data
-        x = tf.zeros((1, 28, 28, 1))
-        weights = np.transpose(weights)
-        ground_truth = np.transpose(ground_truth)[:1, :, :, :]
-        self.get_layer('correlation').set_weights(weights)
-
-        y_pred = self(x, training=False)[0]
-        self.compiled_loss(ground_truth, y_pred, regularization_losses=self.losses)
-        self.compiled_metrics.update_state(ground_truth, y_pred)
-
-        return {m.name: m.result() for m in self.metrics}
-
-    def get_correlation_filter(self):
-        x = tf.zeros((1, 28, 28, 1))
-        cf = self(x, training=False)[1]
-        return cf
-
-
-def create_model(shape, num_correlations):
+def create_model(shape, num_correlations, gt_lable, sample_weight, initial_filter_matrix):
     inputs = Input(shape=shape[1:])
     conv_1 = Conv2D(32, (7, 7), activation='relu', strides=(2, 2))(inputs)
     residual_block = ResidualBlock()(conv_1)
@@ -133,25 +87,109 @@ def create_model(shape, num_correlations):
     outputs = Conv2D(filters=num_correlations, kernel_size=shape[1], use_bias=False,
                      padding='same', activation=None, trainable=False, name='correlation')(cf)
 
-    model = NNCFModel(inputs=inputs, outputs=[outputs, cf])
+    model = NNCFModel(initial_filter_matrix, gt_lable=gt_lable, sample_weight=sample_weight)(inputs, [outputs, cf])
 
     return model
 
 
+class NNCFModel(Model):
+
+    def __init__(self, initial_filter_matrix, num_correlations=32, gt_lable=0, sample_weight=(1, 100)):
+        super(NNCFModel, self).__init__()
+        self.gt_lable = gt_lable
+        self.initial_filter_matrix = initial_filter_matrix
+        self.sample_weight = sample_weight
+        self.num_correlations = num_correlations
+        self.conv_1 = Conv2D(32, (7, 7), activation='relu', strides=(2, 2))
+        self.residual_block = ResidualBlock()
+        self.conv_2 = Conv2D(32, (3, 3), activation='relu', strides=(2, 2))
+        self.filters_change_residual_block = FiltersChangeResidualBlock(64)
+        self.flatten = Flatten()
+        self.dense = Dense(self.initial_filter_matrix.shape[1] ** 2, activation='sigmoid')
+        self.reshape = Reshape(self.initial_filter_matrix.shape[1:], name='corr_filter')
+        self.correlation = Conv2D(filters=self.num_correlations, kernel_size=self.initial_filter_matrix.shape[1],
+                                  use_bias=False, padding='same', activation=None, trainable=False, name='correlation')
+
+    def call(self, inputs):
+        conv_1 = self.conv_1(inputs)
+        residual_block = self.residual_block(conv_1)
+        conv_2 = self.conv_2(residual_block)
+        filters_change_residual_block = self.filters_change_residual_block(conv_2)
+        flatten = self.flatten(filters_change_residual_block)
+        dense = self.dense(flatten)
+        cf = self.reshape(dense)
+        outputs = self.correlation(cf)
+        return outputs, cf
+
+    def get_correlation_filter(self):
+        cf = self(self.initial_filter_matrix, training=False)[1]
+        return cf
+
+    def train_step(self, data):
+        _, ground_truth, sample_weights = data
+
+        with tf.GradientTape() as tape:
+            y_pred = self(self.initial_filter_matrix, training=True)[0]
+            loss = self.compiled_loss(ground_truth, y_pred, sample_weight=sample_weights,
+                                      regularization_losses=self.losses)
+
+        gradients = tape.gradient(loss, self.trainable_variables)
+        self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
+        self.compiled_metrics.update_state(ground_truth, y_pred, sample_weight=sample_weights)
+
+        return {m.name: m.result() for m in self.metrics}
+
+    def test_step(self, data):
+        _, ground_truth, sample_weights = data
+        y_pred = self(self.initial_filter_matrix, training=False)[0]
+        self.compiled_loss(ground_truth, y_pred, regularization_losses=self.losses)
+        self.compiled_metrics.update_state(ground_truth, y_pred)
+
+        return {m.name: m.result() for m in self.metrics}
+
+
+class SetWeightsCallback(tf.keras.callbacks.Callback):
+
+    def __init__(self, generator):
+        super(SetWeightsCallback, self).__init__()
+        self.generator = generator
+
+    def on_train_batch_begin(self, batch, logs=None):
+        weights, _, _ = self.generator[batch]
+        weights = np.expand_dims(weights, 4)
+        weights = np.transpose(weights, [3, 1, 2, 4, 0])
+        self.model.get_layer('correlation').set_weights(weights)
+
+    def on_test_batch_begin(self, batch, logs=None):
+        weights, _, _ = self.generator[batch]
+        weights = np.expand_dims(weights, 4)
+        weights = np.transpose(weights, [3, 1, 2, 4, 0])
+        self.model.get_layer('correlation').set_weights(weights)
+
+
 num_correlations = 32
 epochs = 10
+num_of_images = 3000
+initial_filter_matrix = tf.zeros((1, 28, 28, 1))
+gt_lable = 0
 (train_images, train_labels), (test_images, test_labels) = fashion_mnist.load_data()
 train_data, validation_data, shape = data_prepare(train_images, train_labels, test_images, test_labels,
                                                   label=0,
+                                                  num_of_images=num_of_images,
                                                   num_of_corr=num_correlations)
-print(train_data.element_spec)
-nncf = create_model(shape=shape, num_correlations=num_correlations)
+
+nncf = NNCFModel(num_correlations=num_correlations,
+                 gt_lable=gt_lable,
+                 sample_weight=(1, 100),
+                 initial_filter_matrix=initial_filter_matrix)
 
 optimizer = tf.keras.optimizers.Adam(learning_rate=0.003)
-
+nncf.build(input_shape=(32, 28, 28, 1))
 nncf.compile(optimizer=tf.keras.optimizers.Adam(0.002),
              loss=tf.keras.losses.MeanSquaredError(),
              metrics=['accuracy'])
+print('wsh1:', shape)
 
 print(nncf.summary())
-history = nncf.fit(train_data, validation_data=validation_data, epochs=epochs)
+history = nncf.fit(train_data, steps_per_epoch=num_of_images // num_correlations,
+                   callbacks=[SetWeightsCallback(train_data)], epochs=epochs)
