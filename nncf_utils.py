@@ -1,12 +1,11 @@
-from tensorflow.keras.layers import Input, Reshape, Layer, BatchNormalization, Conv2D, Dense, Flatten, Add, experimental
-from tensorflow.keras.models import Model
 import tensorflow as tf
 import numpy as np
-from tensorflow.keras.datasets import fashion_mnist
+import datetime
+import os
+import shutil
 import matplotlib.pyplot as plt
 from scipy.io import loadmat
 from sklearn.model_selection import train_test_split
-from Correlation_utils import Plot3D
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 
@@ -44,6 +43,7 @@ class FilterDataset:
             print('num_of_images set to {}!'.format(self.num_of_images))
 
         train_images, train_labels = self._balance_class(images=train_images, labels=train_labels)
+        print(train_images.shape)
         train_weights = self._make_data_generator(images=train_images, labels=train_labels)
 
         self.augmentation = None
@@ -58,6 +58,7 @@ class FilterDataset:
             images = np.expand_dims(images, 3)
         elif images.shape[3] > 1:
             images = np.mean(images, axis=3, keepdims=True)
+        print(images.shape)
         positive_images = images[labels == self.gt_label]
         positive_labels = labels[labels == self.gt_label]
         negative_images = images[labels != self.gt_label]
@@ -75,6 +76,7 @@ class FilterDataset:
         if images.shape[0] % self.num_of_corr:
             images = images[:images.shape[0] - images.shape[0] % self.num_of_corr, :, :, :]
             labels = labels[:images.shape[0] - images.shape[0] % self.num_of_corr]
+        print(images.shape)
         return images, labels
 
     def _make_data_generator(self, images, labels):
@@ -108,8 +110,8 @@ class FilterDataset:
     def prepare_data_from_directory(self, train_path, validation_path=None):
         pass
 
-    
-  class SetWeightsCallback(tf.keras.callbacks.Callback):
+
+class SetWeightsCallback(tf.keras.callbacks.Callback):
 
     def __init__(self, generator):
         super(SetWeightsCallback, self).__init__()
@@ -127,10 +129,11 @@ class FilterDataset:
         weights = np.transpose(weights, [3, 1, 2, 4, 0])
         self.model.get_layer('correlation').set_weights(weights)
 
- def make_tensorboard():
-     path = "logs/fit/"
-     if os.path.exists(path):
-         shutil.rmtree(path)
-     log_dir = path + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-     tensorboard = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
-     return tensorboard
+
+def make_tensorboard():
+    path = "logs/fit/"
+    if os.path.exists(path):
+        shutil.rmtree(path)
+    log_dir = path + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    tensorboard = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+    return tensorboard
