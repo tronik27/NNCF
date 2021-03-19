@@ -1,11 +1,6 @@
 from tensorflow.keras.layers import Input, Reshape, Layer, BatchNormalization, Conv2D, Dense, Flatten, Add, experimental
 from tensorflow.keras.models import Model
 import tensorflow as tf
-import numpy as np
-from tensorflow.keras.datasets import fashion_mnist
-import matplotlib.pyplot as plt
-from Correlation_utils import Plot3D
-from nncf_utils import data_prepare
 
 
 class ResidualBlock(Layer):
@@ -75,30 +70,11 @@ class FiltersChangeResidualBlock(Layer):
         return Add()([x, x1])
 
 
-def create_model(shape, num_correlations, gt_lable, sample_weight, initial_filter_matrix):
-    inputs = Input(shape=shape[1:])
-    conv_1 = Conv2D(32, (7, 7), activation='relu', strides=(2, 2))(inputs)
-    residual_block = ResidualBlock()(conv_1)
-    conv_2 = Conv2D(32, (3, 3), activation='relu', strides=(2, 2))(residual_block)
-    filters_change_residual_block = FiltersChangeResidualBlock(64)(conv_2)
-    flatten = Flatten()(filters_change_residual_block)
-    dense = Dense(shape[1] ** 2, activation='sigmoid')(flatten)
-    cf = Reshape(shape[1:], name='corr_filter')(dense)
-    outputs = Conv2D(filters=num_correlations, kernel_size=shape[1], use_bias=False,
-                     padding='same', activation=None, trainable=False, name='correlation')(cf)
-
-    model = NNCFModel(initial_filter_matrix, gt_lable=gt_lable, sample_weight=sample_weight)(inputs, [outputs, cf])
-
-    return model
-
-
 class NNCFModel(Model):
 
-    def __init__(self, initial_filter_matrix, num_correlations=32, gt_lable=0, sample_weight=(1, 100)):
+    def __init__(self, initial_filter_matrix, num_correlations=32):
         super(NNCFModel, self).__init__()
-        self.gt_lable = gt_lable
         self.initial_filter_matrix = initial_filter_matrix
-        self.sample_weight = sample_weight
         self.num_correlations = num_correlations
         self.conv_1 = Conv2D(32, (7, 7), activation='relu', strides=(2, 2))
         self.residual_block = ResidualBlock()
@@ -146,50 +122,3 @@ class NNCFModel(Model):
         self.compiled_metrics.update_state(ground_truth, y_pred)
 
         return {m.name: m.result() for m in self.metrics}
-
-
-class SetWeightsCallback(tf.keras.callbacks.Callback):
-
-    def __init__(self, generator):
-        super(SetWeightsCallback, self).__init__()
-        self.generator = generator
-
-    def on_train_batch_begin(self, batch, logs=None):
-        weights, _, _ = self.generator[batch]
-        weights = np.expand_dims(weights, 4)
-        weights = np.transpose(weights, [3, 1, 2, 4, 0])
-        self.model.get_layer('correlation').set_weights(weights)
-
-    def on_test_batch_begin(self, batch, logs=None):
-        weights, _, _ = self.generator[batch]
-        weights = np.expand_dims(weights, 4)
-        weights = np.transpose(weights, [3, 1, 2, 4, 0])
-        self.model.get_layer('correlation').set_weights(weights)
-
-
-num_correlations = 32
-epochs = 10
-num_of_images = 3000
-initial_filter_matrix = tf.zeros((1, 28, 28, 1))
-gt_lable = 0
-(train_images, train_labels), (test_images, test_labels) = fashion_mnist.load_data()
-train_data, validation_data, shape = data_prepare(train_images, train_labels, test_images, test_labels,
-                                                  label=0,
-                                                  num_of_images=num_of_images,
-                                                  num_of_corr=num_correlations)
-
-nncf = NNCFModel(num_correlations=num_correlations,
-                 gt_lable=gt_lable,
-                 sample_weight=(1, 100),
-                 initial_filter_matrix=initial_filter_matrix)
-
-optimizer = tf.keras.optimizers.Adam(learning_rate=0.003)
-nncf.build(input_shape=(32, 28, 28, 1))
-nncf.compile(optimizer=tf.keras.optimizers.Adam(0.002),
-             loss=tf.keras.losses.MeanSquaredError(),
-             metrics=['accuracy'])
-print('wsh1:', shape)
-
-print(nncf.summary())
-history = nncf.fit(train_data, steps_per_epoch=num_of_images // num_correlations,
-                   callbacks=[SetWeightsCallback(train_data)], epochs=epochs)
