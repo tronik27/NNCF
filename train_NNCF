@@ -36,10 +36,5 @@ reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.1,
 history = nncf.fit(train_data, validation_data=validation_data, steps_per_epoch=shape[0] // num_correlations,
                    callbacks=[SetWeightsCallback(train_data), reduce_lr, tensorboard_callback], epochs=epochs)
 
-model_output = nncf(initial_filter_matrix)
-x = model_output[1]
-c = model_output[0]
-plt.imshow(x[0, :, :, 0], cmap='gray')
-plt.show()
-
-Plot3D(c[0, :, :, 5])
+cf = nncf.get_correlation_filter(plot=True)
+nncf.plot_output_correlations()
