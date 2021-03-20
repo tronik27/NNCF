@@ -1,6 +1,8 @@
-from tensorflow.keras.layers import Input, Reshape, Layer, BatchNormalization, Conv2D, Dense, Flatten, Add, experimental
+from tensorflow.keras.layers import Reshape, Layer, BatchNormalization, Conv2D, Dense, Flatten, Add
 from tensorflow.keras.models import Model
 import tensorflow as tf
+import matplotlib.pyplot as plt
+from matplotlib import cm
 
 
 class ResidualBlock(Layer):
@@ -97,10 +99,6 @@ class NNCFModel(Model):
         outputs = self.correlation(cf)
         return outputs, cf
 
-    def get_correlation_filter(self):
-        cf = self(self.initial_filter_matrix, training=False)[1]
-        return cf
-
     def train_step(self, data):
         _, ground_truth, sample_weights = data
 
@@ -122,3 +120,21 @@ class NNCFModel(Model):
         self.compiled_metrics.update_state(ground_truth, y_pred)
 
         return {m.name: m.result() for m in self.metrics}
+
+    def get_correlation_filter(self, plot=False):
+        cf = self(self.initial_filter_matrix, training=False)[1]
+        if plot:
+            plt.imshow(cf[0, :, :, 0], cmap='gray')
+            plt.show()
+        return cf[0, :, :, 0]
+
+    def plot_output_correlations(self):
+        correlations = self(self.initial_filter_matrix, training=False)[0]
+        if correlations.shape[-1] % 4:
+            correlations = correlations[:, :, :, :-3]
+        fig, axes = plt.subplots(nrows=4, ncols=correlations.shape[-1] // 4, figsize=(16, 16))
+        i = 0
+        for axe in axes.flat:
+            axe.imshow(correlations[0, :, :, i], cmap=cm.jet)
+            i = i + 1
+        plt.show()
