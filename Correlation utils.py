@@ -219,7 +219,7 @@ class PlotCrossCorrelation:
         if self.corr_scenes.shape[0] > 4:
             if self.corr_scenes.shape[0] % 4:
                 self.corr_scenes = self.corr_scenes[:-3, :, :]
-            number_of_cols = self.corr_scenes.shape[-1] // 4
+            number_of_cols = self.corr_scenes.shape[0] // 4
             number_of_rows = 4
         elif self.corr_scenes.shape[0] <= 4:
             number_of_rows = 1
@@ -227,10 +227,8 @@ class PlotCrossCorrelation:
 
         fig, axes = plt.subplots(nrows=number_of_rows, ncols=number_of_cols, figsize=(4 * number_of_rows,
                                                                                       4 * number_of_cols))
-        i = 0
         axes = np.array(axes)
-        for axe in axes.flat:
+        for i, axe in enumerate(axes.flat):
             axe.imshow(self.corr_scenes[i, :, :], cmap=cm.jet)
-            i = i + 1
         plt.show()
         
