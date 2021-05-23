@@ -190,9 +190,11 @@ class Correlator:
 
 class PlotCrossCorrelation:
 
-    def __init__(self, corr_scenes, labels=np.zeros((3, 0))):
+    def __init__(self, corr_scenes, labels=np.zeros(3)):
         if len(corr_scenes.shape) < 3:
             self.corr_scenes = np.expand_dims(corr_scenes, axis=0)
+        elif len(corr_scenes.shape) > 3:
+            self.corr_scenes = np.mean(corr_scenes, axis=-1)
         else:
             self.corr_scenes = corr_scenes
         self.labels = labels
@@ -210,9 +212,9 @@ class PlotCrossCorrelation:
             fig.colorbar(surf, shrink=0.5, aspect=10)
             if self.labels.any():
                 if self.labels[i] == 1:
-                    axes.set_title('Correlation with positive object', size=10)
+                    axes.set_title('Positive Correlation', size=15)
                 else:
-                    axes.set_title('Correlation with negative object', size=10)
+                    axes.set_title('Negative Correlation', size=15)
         plt.show()
 
     def plot(self):
@@ -230,5 +232,10 @@ class PlotCrossCorrelation:
         axes = np.array(axes)
         for i, axe in enumerate(axes.flat):
             axe.imshow(self.corr_scenes[i, :, :], cmap=cm.jet)
+            if self.labels.any():
+                if self.labels[i] == 1:
+                    axe.set_title('Positive Correlation', size=10)
+                else:
+                    axe.set_title('Negative Correlation', size=10)
         plt.show()
         
